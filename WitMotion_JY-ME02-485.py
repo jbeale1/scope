@@ -14,7 +14,9 @@ import serial
 import time
 import struct # unpack bytes to int
 
+
 averages = 94  # how many readings to average together
+#averages = 10  # how many readings to average together
 maxCounts = 32768 # number of counts from 15-bit sensor (0..maxCounts-1)
 degPerCount = 360.0 / (maxCounts) # angular scale factor of sensor
 
@@ -30,6 +32,7 @@ if __name__ == "__main__":
 
         while True:
             angleSum = 0 # accumulated sum of angle readings
+            tempSum = 0  # accumulated sum of temperature readings (deg.C)
             validReads = 0 # how many good readings so far
             while (validReads < averages):            
                 ser.write(cmd_bytes)
@@ -38,12 +41,18 @@ if __name__ == "__main__":
                 if (recCount != recLen): # got all expected data?
                     continue
                 angleR = recData[29:31]
-                angle = struct.unpack('>H', angleR)[0] # convert to 16-bit integer
+                tempR = recData[35:37]                
+                angle = struct.unpack('>H', angleR)[0] # convert to 16-bit integer                
                 if (angle > (3*maxCounts)/4):  # put split at -90deg
                     angle = angle-maxCounts
+
+                # temp bytes: 09D9 and 09FD for 25.21 C, 25.57 C
+                temp = struct.unpack('>H', tempR)[0] # convert to 16-bit integer                
                 angleSum += angle
+                tempSum += temp
                 validReads += 1
 
             angleDeg = degPerCount * (angleSum / validReads) # angle in degrees
+            tempC = (tempSum / validReads) / 100.0
             tEpoch = time.time()
-            print("%0.1f, %5.3f" % (tEpoch,angleDeg))
+            print("%0.1f, %5.3f, %5.3f" % (tEpoch,angleDeg,tempC))
