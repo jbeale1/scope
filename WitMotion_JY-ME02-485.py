@@ -9,26 +9,26 @@
 # encoder resolves 360 degree angular position into 15-bit word: 0000 to 32767
 # data packet also includes angular rate and sensor temperature
 
-
 import serial
 import time
 import struct # unpack bytes to int
 
-
 averages = 94  # how many readings to average together
-#averages = 10  # how many readings to average together
+
 maxCounts = 32768 # number of counts from 15-bit sensor (0..maxCounts-1)
 degPerCount = 360.0 / (maxCounts) # angular scale factor of sensor
 
 if __name__ == "__main__":
     port = 'COM6'  # or '/dev/ttyUSB0' etc. on Linux
     baudrate = 9600
-    recLen = 69   # number of bytes expected from device
-    # command to encoder to readout angle and angular rate
-    cmd_bytes = bytes.fromhex('50 03 00 04 00 20 08 52')               
+    recLen = 69   # number of bytes in response from JYME02
+    # command to encoder to readout angle, angular rate, temperature:
+    cmd_bytes = bytes.fromhex('50 03 00 04 00 20 08 52')  
+    # response packet should start with these bytes:
+    header = bytes.fromhex('50 03 40 00 02 00')
 
-    with serial.Serial(port, baudrate, timeout=0.3) as ser:        
-        junk = ser.read(200) # clear out existing data in serial buffer
+    with serial.Serial(port, baudrate, timeout=0.1) as ser:        
+        ser.read(200) # clear out any data in receive buffer
 
         while True:
             angleSum = 0 # accumulated sum of angle readings
@@ -37,22 +37,27 @@ if __name__ == "__main__":
             while (validReads < averages):            
                 ser.write(cmd_bytes)
                 recData = ser.read(recLen)
-                recCount = len(recData)
-                if (recCount != recLen): # got all expected data?
+                recCount = len(recData)  
+                firstSix = recData[0:6]              
+                # does response packet look good?
+                if (recCount != recLen) or (firstSix != header):                 
+                    bstr = firstSix.hex()
+                    print("Receive error: %d: %s" % (recCount,bstr))
+                    ser.read(200) # clear out any bad data in receive buffer
                     continue
-                angleR = recData[29:31]
-                tempR = recData[35:37]                
+                angleR = recData[29:31] # 2 bytes of angle data
+                tempR = recData[35:37]  # 2 bytes of temperature data
                 angle = struct.unpack('>H', angleR)[0] # convert to 16-bit integer                
                 if (angle > (3*maxCounts)/4):  # put split at -90deg
                     angle = angle-maxCounts
 
-                # temp bytes: 09D9 and 09FD for 25.21 C, 25.57 C
+                # temp in integer hundredths of deg.C: 09D9 means 25.21 C
                 temp = struct.unpack('>H', tempR)[0] # convert to 16-bit integer                
                 angleSum += angle
                 tempSum += temp
                 validReads += 1
 
             angleDeg = degPerCount * (angleSum / validReads) # angle in degrees
-            tempC = (tempSum / validReads) / 100.0
+            tempC = (tempSum / validReads) / 100.0 # temp in degrees C
             tEpoch = time.time()
             print("%0.1f, %5.3f, %5.3f" % (tEpoch,angleDeg,tempC))
